@@ -1,0 +1,1 @@
+session['is_admin']
