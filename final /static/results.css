@@ -1,0 +1,284 @@
+/* Import Google Font */
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap');
+
+body {
+    font-family: 'Poppins', sans-serif;
+    background: #e3f2fd; /* Light sky blue background */
+    color: #333;
+    margin: 0;
+    padding: 20px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+}
+
+/* Main Container */
+.container {
+    width: 90%;
+    max-width: 900px;
+    background: white;
+    padding: 30px;
+    border-radius: 15px;
+    box-shadow: 0 0 15px rgba(0, 123, 255, 0.2);
+    border: 1px solid rgba(0, 123, 255, 0.3);
+    text-align: center;
+}
+
+/* Header */
+header {
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+/* Student Details Section */
+.student-details {
+    background: #bbdefb;
+    padding: 15px;
+    border-radius: 10px;
+    text-align: left;
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    border-left: 4px solid #007bff;
+    margin-bottom: 20px;
+}
+
+.student-details div {
+    width: 48%;
+    font-size: 16px;
+    font-weight: 500;
+    color: #003c8f;
+}
+
+/* Result Cards */
+.card {
+    background: #f1f8ff;
+    padding: 20px;
+    border-radius: 10px;
+    margin: 15px 0;
+    border: 1px solid rgba(0, 123, 255, 0.3);
+    box-shadow: 0px 4px 10px rgba(0, 123, 255, 0.1);
+    text-align: left;
+}
+
+h2 {
+    color: #007bff;
+    font-size: 20px;
+    border-left: 4px solid #007bff;
+    padding-left: 10px;
+}
+
+/* No Data Message */
+.no-data {
+    color: #ff4c4c;
+    font-style: italic;
+    font-weight: bold;
+}
+
+/* Table Styling */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+}
+
+th, td {
+    padding: 12px;
+    font-size: 16px;
+    text-align: center;
+    border-bottom: 1px solid #ddd;
+}
+
+th {
+    background: #007bff;
+    color: white;
+    font-weight: bold;
+}
+
+td {
+    background: white;
+    color: black;
+}
+
+/* Hover Effect */
+tr:hover td {
+    background: #d0e9ff;
+    transition: 0.3s ease-in-out;
+}
+
+/* SGPA Section */
+.sgpa {
+    margin-top: 10px;
+    padding: 10px;
+    background: #bbdefb;
+    border-radius: 5px;
+    font-weight: 600;
+    text-align: center;
+}
+
+/* Back Link */
+/* Button styling */
+button {
+    background-color: #1e90ff;
+    color: #fff;
+    font-size: 1.2em;
+    padding: 12px 25px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background-color 0.3s ease, transform 0.2s ease;
+    width: 100%;
+}
+
+button:hover {
+    background-color: #4682b4; /* Darker blue on hover */
+    transform: translateY(-3px);
+}
+.back-link {
+    text-align: left;
+    margin-top: 40px;
+}
+
+.back-link a {
+    font-size: 1.2em;
+    text-decoration: none;
+    color: #1e90ff;
+    padding: 10px 20px;
+    background-color: #fff;
+    border-radius: 8px;
+    border: 2px solid #1e90ff;
+    transition: background-color 0.3s ease, transform 0.2s ease;
+}
+
+.back-link a:hover {
+    background-color: #1e90ff;
+    color: white;
+    transform: translateY(-3px);
+}
+
+
+.back-link a {
+    text-decoration: none;
+    font-size: 18px;
+    font-weight: 600;body {
+    font-family: 'Roboto', sans-serif;
+    background: linear-gradient(135deg, #e0f7fa, #f0f8ff); /* Light blue gradient */
+    margin: 0;
+    padding: 20px;
+    color: #333;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+}
+
+.container {
+    width: 90%;
+    max-width: 800px;
+    margin: 20px auto;
+    background-color: white;
+    border-radius: 12px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    padding: 25px;
+}
+
+header h1 {
+    color: #1976D2;
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+.student-details {
+    background-color: #e3f2fd;
+    padding: 15px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+}
+
+.student-details div {
+    margin-bottom: 8px;
+}
+
+.card {
+    border: 1px solid #e0e0e0;
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 20px;
+    transition: box-shadow 0.3s ease;
+}
+
+.card:hover {
+    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+}
+
+.card h2 {
+    color: #1976D2;
+    margin-bottom: 15px;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 15px;
+}
+
+th, td {
+    padding: 12px;
+    border: 1px solid #e0e0e0;
+    text-align: left;
+}
+
+th {
+    background-color: #1976D2;
+    color: white;
+    font-weight: 600;
+}
+
+tr:nth-child(even) {
+    background-color: #f9f9f9;
+}
+
+.sgpa {
+    margin-top: 15px;
+    font-weight: 500;
+}
+
+.sgpa span {
+    font-weight: normal;
+    margin-left: 5px;
+}
+
+.no-data {
+    color: #d32f2f;
+    text-align: center;
+    margin-top: 10px;
+}
+
+.back-link {
+    text-align: center;
+    margin-top: 20px;
+}
+
+.back-link a {
+    text-decoration: none;
+    background-color: #1976D2;
+    color: white;
+    padding: 10px 20px;
+    border-radius: 8px;
+    transition: background-color 0.3s ease, transform 0.2s ease;
+}
+
+.back-link a:hover {
+    background-color: #1565C0;
+    transform: translateY(-2px);
+}
+    color: white;
+    padding: 10px 15px;
+    border-radius: 5px;
+    background: #007bff;
+    transition: all 0.3s ease-in-out;
+}
+
+.back-link a:hover {
+    background: #0056b3;
+}

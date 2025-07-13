@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+
+<html lang="en">
+
+<head>
+
+<meta charset="UTF-8">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Student Marks Management Portal</title>
+
+<style>
+
+body {
+
+font-family: 'Poppins', sans-serif;
+
+margin: 0;
+
+padding: 0;
+
+background: linear-gradient(135deg, #e6f7ff, #f0f8ff); /* Light blue gradient */
+
+color: #333;
+
+min-height: 100vh;
+
+display: flex;
+
+flex-direction: column;
+
+}
+
+
+
+.navbar {
+
+background: rgba(255, 255, 255, 0.95); /* Slightly transparent white */
+
+color: #1e3a8a; /* Dark blue */
+
+padding: 25px 0;
+
+box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+
+position: sticky;
+
+top: 0;
+
+z-index: 100;
+
+backdrop-filter: blur(15px);
+
+}
+
+
+
+.navbar .container {
+
+width: 85%;
+
+margin: auto;
+
+display: flex;
+
+justify-content: space-between;
+
+align-items: center;
+
+}
+
+
+
+.navbar .logo {
+
+font-size: 2.2em;
+
+font-weight: 700;
+
+color: #2563eb; /* Strong blue */
+
+letter-spacing: 1px;
+
+transition: transform 0.3s ease;
+
+}
+
+
+
+.navbar .logo:hover {
+
+transform: scale(1.03);
+
+}
+
+
+
+.navbar .nav-links {
+
+list-style: none;
+
+display: flex;
+
+}
+
+
+
+.navbar .nav-links li {
+
+margin: 0 30px;
+
+}
+
+
+
+.navbar .nav-links a {
+
+color: #1e3a8a;
+
+text-decoration: none;
+
+padding: 14px 25px;
+
+border-radius: 30px;
+
+transition: background-color 0.3s ease, color 0.3s ease, transform 0.2s ease;
+
+font-weight: 600;
+
+}
+
+
+
+.navbar .nav-links a:hover, .navbar .nav-links a.active {
+
+background-color: #dbeafe; /* Light blue hover */
+
+color: #2563eb;
+
+transform: translateY(-3px);
+
+}
+
+
+
+.hero {
+
+text-align: center;
+
+padding: 200px 20px;
+
+flex-grow: 1;
+
+display: flex;
+
+flex-direction: column;
+
+justify-content: center;
+
+align-items: center;
+
+}
+
+
+
+.hero h1 {
+
+font-size: 4em;
+
+margin-bottom: 40px;
+
+color: #1e3a8a;
+
+font-weight: 700;
+
+letter-spacing: -2px;
+
+text-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+
+}
+
+
+
+.hero p {
+    font-size: 2em;
+    color: #476fa7;
+    max-width: 2000px;
+    margin: 0 auto 50px;  /* Removes auto-centering */
+    line-height: 1.5;
+    text-align: left; /* Ensures text alignment to the left */
+}
+
+
+
+.hero .cta-button {
+
+background: linear-gradient(135deg, #3b82f6, #2563eb); /* Blue gradient */
+
+color: white;
+
+padding: 18px 40px;
+
+border: none;
+
+border-radius: 35px;
+
+font-size: 1.2em;
+
+cursor: pointer;
+
+transition: transform 0.2s ease, box-shadow 0.3s ease;
+
+box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+
+}
+
+
+
+.hero .cta-button:hover {
+
+transform: translateY(-5px);
+
+box-shadow: 0 10px 20px rgba(0, 0, 0, 0.3);
+
+}
+
+
+
+footer {
+
+text-align: center;
+
+padding: 30px 0;
+
+background: rgba(255, 255, 255, 0.95);
+
+color: #4b5563;
+
+border-top: 1px solid #e5e7eb;
+
+backdrop-filter: blur(10px);
+
+}
+
+
+
+/* Subtle patterns */
+
+body::before {
+
+content: "";
+
+position: fixed;
+
+top: 0;
+
+left: 0;
+
+width: 100%;
+
+height: 100%;
+
+background: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><circle fill="rgba(37,99,235,0.05)" cx="50" cy="50" r="40"/></svg>');
+
+pointer-events: none;
+
+z-index: -1;
+
+}
+
+.alert {
+    padding: 15px;
+    margin: 10px 0;
+    border-radius: 5px;
+    font-size: 16px;
+    font-weight: bold;
+    text-align: center;
+}
+
+/* Success Message (Green) */
+.alert-success {
+    background-color: #4CAF50;
+    color: white;
+    border-left: 5px solid #2E7D32;
+}
+
+/* Error Message (Red) */
+.alert-danger {
+    background-color: #f44336;
+    color: white;
+    border-left: 5px solid #B71C1C;
+}
+
+/* Warning Message (Yellow) */
+.alert-warning {
+    background-color: #ff9800;
+    color: white;
+    border-left: 5px solid #E65100;
+}
+
+/* Info Message (Blue) */
+.alert-info {
+    background-color: #2196F3;
+    color: white;
+    border-left: 5px solid #0D47A1;
+}
+
+/* Add a fade-in effect */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.alert {
+    animation: fadeIn 0.5s ease-in-out;
+}
+
+
+
+/* Responsive adjustments */
+
+@media (max-width: 768px) {
+
+.navbar .nav-links {
+
+flex-direction: column;
+
+align-items: center;
+
+}
+
+.navbar .nav-links li {
+
+margin: 10px 0;
+
+}
+
+}
+
+</style>
+
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
+
+</head>
+
+<body>
+
+
+
+<nav class="navbar">
+
+<div class="container">
+
+<div class="logo">🎓 Student marks Portal</div>
+
+<ul class="nav-links">
+
+<li><a href="/upload_results">Upload Results</a></li>
+
+<li><a href="/upload_details">Upload Details</a></li>
+
+<li><a href="/search">Search Results</a></li>
+
+<li><a href="/all_students">CGPA Report</a></li>
+
+<li><a href="{{ url_for('logout') }}">Logout</a></li>
+
+</ul>
+
+</div>
+
+</nav>
+
+
+
+<section class="hero">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}
+        <div class="alert alert-{{ category }}">{{ message }}</div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+<h1>ANDHRA LOYOLA COLLEGE OF ENGINEERING AND TECHNOLOGY </h1>
+
+<p>Features:</p>
+
+<p> --> uploading student semester</p>
+
+<p>--> uploading student details </p>
+
+<p>--> serching student each semester Results throught their register numbers</p>
+
+<p>--> generation of SGPA and CGPA for all studenat individually</p>
+
+
+
+
+
+
+</section>
+
+
+
+<footer>
+
+<p>&copy; Developed by student of aliet in 2025</p>
+
+</footer>
+
+
+
+<script>
+
+// Optional: JavaScript for interactive elements
+
+</script>
+
+</body>
+
+</html>
