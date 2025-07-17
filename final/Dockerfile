@@ -10,6 +10,12 @@ ENV DEBIAN_FRONTEND=noninteractive
 # - ttf-mscorefonts-installer: Provides common Microsoft fonts.
 # - libglib2.0-0: A dependency for some font-related libraries.
 RUN apt-get update && \
+    # Add contrib and non-free repositories to sources.list
+    echo "deb http://deb.debian.org/debian/ bookworm main contrib non-free" >> /etc/apt/sources.list && \
+    echo "deb http://deb.debian.org/debian/ bookworm-updates main contrib non-free" >> /etc/apt/sources.list && \
+    echo "deb http://deb.debian.org/debian-security bookworm-security main contrib non-free" >> /etc/apt/sources.list && \
+    # Update apt cache again after adding new repositories
+    apt-get update && \
     # Accept the EULA for ttf-mscorefonts-installer silently BEFORE installing it
     echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | debconf-set-selections && \
     apt-get install -y --no-install-recommends \
@@ -32,7 +38,7 @@ WORKDIR /app
 COPY requirements.txt .
 
 # Install Python dependencies
-# Ensure 'jpype1' is in your requirements.txt!
+# IMPORTANT: Ensure 'jpype1' is in your requirements.txt file!
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of your application files
