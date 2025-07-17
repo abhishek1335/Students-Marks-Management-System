@@ -55,7 +55,7 @@ EXPOSE 5000
 # -b 0.0.0.0:5000: Binds Gunicorn to all network interfaces on port 5000
 # --workers 2: Number of worker processes (adjust based on your CPU cores/Render plan)
 # --timeout 300: Request timeout in seconds (important for potentially long-running PDF ops)
-# --limit-request-body 1073741824: Max request body size (1GB in bytes, adjust as needed for your PDFs)
-#                                 This is the correct Gunicorn argument!
+# Gunicorn does not have a direct --limit-request-body argument.
+# Flask's app.config['MAX_CONTENT_LENGTH'] handles the file size limit.
 # app:app: Assumes your Flask application instance is named 'app' in 'app.py'
-CMD ["gunicorn", "-b", "0.0.0.0:5000", "--workers", "2", "--timeout", "300", "--limit-request-body", "1073741824", "app:app"]
+CMD ["gunicorn", "-b", "0.0.0.0:5000", "--workers", "2", "--timeout", "300", "app:app"]
