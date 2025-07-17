@@ -1,22 +1,23 @@
 # Use a base Python image
 FROM python:3.12-slim
 
+# Set DEBIAN_FRONTEND to noninteractive to prevent interactive prompts during apt-get
+ENV DEBIAN_FRONTEND=noninteractive
+
 # Install required system dependencies:
-# - openjdk-17-jdk: We need the JDK (Java Development Kit) for jpype, not just the JRE.
-#   The JDK includes 'javac' and development tools that jpype might leverage.
+# - openjdk-17-jdk: We need the JDK (Java Development Kit) for jpype.
 # - fontconfig: Essential for Java applications to properly handle fonts.
-# - ttf-mscorefonts-installer: Provides common Microsoft fonts (like Times New Roman, Arial, Courier New)
-#   which often resolve the PDFBox font fallback warnings.
+# - ttf-mscorefonts-installer: Provides common Microsoft fonts.
 # - libglib2.0-0: A dependency for some font-related libraries.
 RUN apt-get update && \
+    # Accept the EULA for ttf-mscorefonts-installer silently BEFORE installing it
+    echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | debconf-set-selections && \
     apt-get install -y --no-install-recommends \
         openjdk-17-jdk \
         fontconfig \
         ttf-mscorefonts-installer \
         libglib2.0-0 && \
-    # Accept the EULA for ttf-mscorefonts-installer silently
-    echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | debconf-set-selections && \
-    apt-get install -y --no-install-recommends ttf-mscorefonts-installer && \
+    # Clean up apt cache to reduce image size
     rm -rf /var/lib/apt/lists/*
 
 # Set environment variable for Java Home
