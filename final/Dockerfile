@@ -23,6 +23,10 @@ RUN apt-get update && \
         fontconfig \
         ttf-mscorefonts-installer \
         libglib2.0-0 && \
+    # Create the uploads directory and set permissions for the app to write to it
+    # This is crucial for file uploads.
+    mkdir -p /app/uploads && \
+    chmod -R 777 /app/uploads && \
     # Clean up apt cache to reduce image size
     rm -rf /var/lib/apt/lists/*
 
@@ -47,5 +51,10 @@ COPY . .
 # Expose the port your Flask app listens on (default Flask port is 5000)
 EXPOSE 5000
 
-# Run the Flask app
-CMD ["python", "app.py"]
+# Run the Flask app with Gunicorn
+# -b 0.0.0.0:5000: Binds Gunicorn to all network interfaces on port 5000
+# --workers 2: Number of worker processes (adjust based on your CPU cores/Render plan)
+# --timeout 300: Request timeout in seconds (important for potentially long-running PDF ops)
+# --max-requests-body 1073741824: Max request body size (1GB in bytes, adjust as needed for your PDFs)
+# app:app: Assumes your Flask application instance is named 'app' in 'app.py'
+CMD ["gunicorn", "-b", "0.0.0.0:5000", "--workers", "2", "--timeout", "300", "--max-requests-body", "1073741824", "app:app"]
