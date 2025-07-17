@@ -38,6 +38,7 @@ idna==3.8
 itsdangerous==2.2.0
 Jinja2==3.1.4
 jiter==0.5.0
+jpype1
 jsonschema==4.23.0
 jsonschema-specifications==2023.12.1
 kiwisolver==1.4.5
