@@ -89,7 +89,7 @@ def clean_float_data(value):
     if pd.isna(value) or str(value).strip() in ('---', '', 'N/A', 'nan'):
         return 0.0
     try:
-        return float(str(value).strip()))
+        return float(str(value).strip())
     except ValueError:
         return 0.0
 
