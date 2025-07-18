@@ -151,7 +151,7 @@ def login():
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT id, username, email, password, is_admin FROM users WHERE email=?",
-                (email,)
+                (email,))
             user = cursor.fetchone()
 
         if not user:
