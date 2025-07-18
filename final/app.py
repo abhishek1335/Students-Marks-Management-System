@@ -19,7 +19,7 @@ from flask_mail import Mail, Message
 
 # --- IMPORTANT: Celery Imports and Setup ---
 # Import the configured Celery app and tasks from worker.py
-from worker import celery_app, process_section_excel_task, process_single_student_excel_task, process_marks_pdf_task, generate_pdf_task
+from worker import celery_app, process_excel_task, generate_pdf_task
 
 # Assuming config.py is in the same directory and contains these connection functions
 # Ensure config.py defines: connect_auth_db, connect_results_db, connect_student_db, initialize_all_dbs
