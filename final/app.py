@@ -2,7 +2,7 @@ import os
 import io
 import bcrypt
 import pandas as pd
-import tabula
+import tabula # Keep this, as tabula-py is used in worker.py for PDF processing
 import hashlib
 import re
 import random
@@ -12,12 +12,14 @@ import gc # Import garbage collection module
 
 from flask import Flask, jsonify, render_template, request, redirect, url_for, flash, session, Response, send_file
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
-from werkzeug.security import generate_password_hash, check_password_hash # werkzeug.security is not used for hash/check, but ok to keep
+from werkzeug.security import generate_password_hash, check_password_hash # Keep if potentially used elsewhere, though bcrypt is main
+from werkzeug.utils import secure_filename # ADDED: This was missing but used
+
 from flask_mail import Mail, Message
 
-# --- IMPORTANT: RQ (Redis Queue) Imports and Setup ---
-from redis import Redis
-from rq import Queue
+# --- IMPORTANT: Celery Imports and Setup ---
+# Import the configured Celery app and tasks from worker.py
+from worker import celery_app, process_section_excel_task, process_single_student_excel_task, process_marks_pdf_task, generate_pdf_task
 
 # Assuming config.py is in the same directory and contains these connection functions
 # Ensure config.py defines: connect_auth_db, connect_results_db, connect_student_db, initialize_all_dbs
@@ -55,13 +57,6 @@ app.config['UPLOAD_FOLDER1'] = UPLOAD_FOLDER1
 
 # Set a maximum content length for uploads (e.g., 100 MB)
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024 # 100 MB
-
-# --- Redis & RQ Queue Setup for Flask app ---
-# This will pick up the REDIS_URL environment variable from Render
-# For local development, it defaults to localhost
-redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
-redis_conn = Redis.from_url(redis_url)
-q = Queue(connection=redis_conn) # Initialize RQ queue
 
 # --- Helper Functions ---
 
@@ -286,92 +281,8 @@ def details_page():
 def results_page():
     return render_template('upload_student_results.html')
 
-# --- Background Task Definition (for Excel processing) ---
-# This function processes the excel for student details (to section tables)
-def process_excel_to_section_tables(excel_path):
-    print(f"[{os.getpid()}] Starting Excel (sections) processing for {excel_path}...")
-    try:
-        df = pd.read_excel(excel_path)
-        conn = connect_student_db() # Use connect_student_db as per config.py
-        with conn:
-            cursor = conn.cursor()
-            # Assuming the Excel has columns like 'Section', 'Roll Number', 'Name'
-            for section_name, section_df in df.groupby('Section'):
-                # Sanitize section name for table name
-                clean_section_name = re.sub(r'[^a-zA-Z0-9_]', '', section_name)
-                table_name = f"section_{clean_section_name}"
-
-                cursor.execute(f"""
-                    CREATE TABLE IF NOT EXISTS `{table_name}` (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        roll_number TEXT UNIQUE NOT NULL,
-                        name TEXT
-                    )
-                """)
-                conn.commit()
-
-                for index, row in section_df.iterrows():
-                    roll_number = str(row['Roll Number']).strip()
-                    name = str(row['Name']).strip()
-                    if roll_number and name:
-                        cursor.execute(f"""
-                            INSERT OR IGNORE INTO `{table_name}` (roll_number, name)
-                            VALUES (?, ?)
-                        """, (roll_number, name))
-                conn.commit()
-        print(f"[{os.getpid()}] Excel (sections) processing complete for {excel_path}.")
-        flash("Excel file for sections processed successfully!", "success") # This flash won't be seen by user, logs only
-    except Exception as e:
-        print(f"[{os.getpid()}] Error processing Excel for sections {excel_path}: {e}")
-        import traceback
-        traceback.print_exc()
-        flash(f"Error processing Excel for sections: {str(e)}", "danger") # This flash won't be seen
-    finally:
-        if os.path.exists(excel_path):
-            os.remove(excel_path) # Clean up the temporary file
-            print(f"[{os.getpid()}] Cleaned up {excel_path}")
-        gc.collect()
-
-# This function processes the excel for single student details (to 'students' table in results.db)
-def process_excel_to_single_students_table(excel_path):
-    print(f"[{os.getpid()}] Starting Excel (single students) processing for {excel_path}...")
-    try:
-        df = pd.read_excel(excel_path)
-        conn = connect_results_db() # Use connect_results_db as per config.py
-        with conn:
-            cursor = conn.cursor()
-            # Ensure 'students' table exists (it should be in initialize_results_db)
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS students (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT,
-                    roll_number TEXT UNIQUE
-                )
-            """)
-            conn.commit()
-
-            # Assuming the Excel has 'Roll Number', 'Name'
-            for index, row in df.iterrows():
-                roll_number = str(row['Roll Number']).strip()
-                name = str(row['Name']).strip()
-                if roll_number and name:
-                    cursor.execute("""
-                        INSERT OR IGNORE INTO students (roll_number, name)
-                        VALUES (?, ?)
-                    """, (roll_number, name))
-            conn.commit()
-        print(f"[{os.getpid()}] Excel (single students) processing complete for {excel_path}.")
-        flash("Excel file for single students processed successfully!", "success") # This flash won't be seen
-    except Exception as e:
-        print(f"[{os.getpid()}] Error processing Excel for single students {excel_path}: {e}")
-        import traceback
-        traceback.print_exc()
-        flash(f"Error processing Excel for single students: {str(e)}", "danger") # This flash won't be seen
-    finally:
-        if os.path.exists(excel_path):
-            os.remove(excel_path) # Clean up the temporary file
-            print(f"[{os.getpid()}] Cleaned up {excel_path}")
-        gc.collect()
+# --- REMOVED: process_excel_to_section_tables and process_excel_to_single_students_table
+# These functions should ONLY exist in worker.py as Celery tasks.
 
 # Uploading students details Excel (section-wise)
 @app.route('/upload_student_details_excel', methods=['POST'])
@@ -395,8 +306,8 @@ def upload_student_details_excel():
         excel_path = os.path.join(app.config['UPLOAD_FOLDER1'], filename)
         file.save(excel_path)
 
-        # Enqueue the excel processing task to the RQ queue
-        q.enqueue(process_excel_to_section_tables, excel_path)
+        # Enqueue the excel processing task to the Celery queue
+        process_section_excel_task.delay(excel_path)
         flash('Excel file uploaded. Processing student section details in the background...', 'info')
         return redirect(url_for('details_page'))
     else:
@@ -425,8 +336,8 @@ def upload_single_student_excel():
         excel_path = os.path.join(app.config['UPLOAD_FOLDER1'], filename)
         file.save(excel_path)
 
-        # Enqueue the excel processing task to the RQ queue
-        q.enqueue(process_excel_to_single_students_table, excel_path)
+        # Enqueue the excel processing task to the Celery queue
+        process_single_student_excel_task.delay(excel_path)
         flash('Excel file uploaded. Processing single student details in the background...', 'info')
         return redirect(url_for('details_page'))
     else:
@@ -457,12 +368,18 @@ def upload_pdf():
         return redirect(url_for('results_page'))
 
     # Sanitize table name (for logging/metadata, actual table creation is in worker)
+    # Note: The worker task `process_marks_pdf_task` defines the dynamic table name.
+    # This `table_name` variable here is just for local app context if needed.
     table_name = f"y{year}_s{semester}_results"
     table_name = re.sub(r'[^a-zA-Z0-9_]', '', table_name)
 
     # Generate a unique filename to prevent clashes, using hash + original name
-    unique_filename = f"{hashlib.sha256(file.read()).hexdigest()}_{file.filename}"
+    # Read the file content for hashing, then seek back to 0 for saving.
+    file_content = file.read()
+    file_hash = hashlib.sha256(file_content).hexdigest()
     file.seek(0) # Reset file pointer after reading for hash
+
+    unique_filename = f"{file_hash}_{secure_filename(file.filename)}" # Use secure_filename for original name part
     temp_pdf_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
 
     try:
@@ -476,24 +393,22 @@ def upload_pdf():
                 pdf_hash TEXT UNIQUE
             );
             """)
-            cursor_results.execute("SELECT pdf_hash FROM uploaded_pdfs WHERE pdf_hash = ?", (hashlib.sha256(file.read()).hexdigest(),))
-            file.seek(0) # Reset file pointer again after reading for hash
+            cursor_results.execute("SELECT pdf_hash FROM uploaded_pdfs WHERE pdf_hash = ?", (file_hash,))
             if cursor_results.fetchone():
                 flash("This PDF has already been uploaded. No changes made.", 'warning')
-                print(f"PDF {file.filename} already uploaded (hash: {hashlib.sha256(file.read()).hexdigest()}).")
+                print(f"PDF {file.filename} already uploaded (hash: {file_hash}).")
                 return redirect(url_for('results_page'))
 
         file.save(temp_pdf_path)
         print(f"File saved to temp path: {temp_pdf_path}")
 
-        # --- Enqueue the PDF processing task to the RQ queue ---
-        # The 'process_marks_pdf_task' function MUST be in worker.py
-        q.enqueue(process_marks_pdf_task, temp_pdf_path, year, semester)
+        # --- Enqueue the PDF processing task to the Celery queue ---
+        # Call the task with .delay()
+        # The 'process_marks_pdf_task' function MUST be in worker.py and decorated with @celery_app.task
+        process_marks_pdf_task.delay(temp_pdf_path, year, semester)
 
-        # Record that we've enqueued this PDF by its hash
-        # The worker will insert the hash into uploaded_pdfs table *after* successful processing
-        # This prevents the app from re-enqueueing the same PDF if the worker fails.
-        # This logic is a bit tricky for robust handling. For now, let the worker handle the final insert.
+        # The worker will insert the hash into uploaded_pdfs table *after* successful processing.
+        # This prevents marking it as processed if the worker fails.
 
         flash('PDF uploaded. Processing has started in the background...', 'info')
         print("Finished /upload POST request, task enqueued.")
@@ -537,6 +452,10 @@ def get_results():
     try:
         with conn_results:
             with conn_student:
+                # Set row_factory for both connections to enable dict-like access
+                conn_results.row_factory = sqlite3.Row
+                conn_student.row_factory = sqlite3.Row
+
                 cursor_results = conn_results.cursor()
                 cursor_student = conn_student.cursor()
 
@@ -602,7 +521,7 @@ def get_results():
                         student_results[table] = "Error"
                         sgpa_results[table] = "Error"
 
-        cgpa = round(total_cgpa_points / total_cgpa_credits, 2) if total_cgpa_credits > 0 else "No CGPA"
+                cgpa = round(total_cgpa_points / total_cgpa_credits, 2) if total_cgpa_credits > 0 else "No CGPA"
 
     except Exception as e:
         flash(f"Error fetching student results: {str(e)}", "danger")
@@ -638,6 +557,10 @@ def all_students():
 
         with student_conn:
             with result_conn:
+                # Set row_factory for both connections to enable dict-like access
+                student_conn.row_factory = sqlite3.Row
+                result_conn.row_factory = sqlite3.Row
+
                 student_cursor = student_conn.cursor()
                 result_cursor = result_conn.cursor()
 
@@ -650,7 +573,7 @@ def all_students():
                 if result_cursor.fetchone():
                     section_tables_in_db.append('students')
 
-                # Filter out 'uploaded_pdfs' or other non-section tables
+                # Filter out 'sqlite_sequence' or other non-section tables
                 section_tables_in_db = [t for t in section_tables_in_db if t not in ['sqlite_sequence', 'uploaded_pdfs']]
                 section_tables_in_db = list(set(section_tables_in_db)) # Remove duplicates if any
 
@@ -703,7 +626,7 @@ def all_students():
                                                 if fetched_credit_data and fetched_credit_data['credits'] is not None:
                                                     credits = fetched_credit_data['credits']
                                                 else:
-                                                    credits = 0
+                                                    credits = 0 # Default if no valid credits found
                                             except sqlite3.Error as fetch_error:
                                                 print(f"Error fetching credits for {subname}: {fetch_error}")
                                                 credits = 0
@@ -717,119 +640,126 @@ def all_students():
                                         total_cgpa_credits_student += total_credits_semester
 
                             except sqlite3.OperationalError:
-                                # This table might not exist yet for certain semesters/years
-                                print(f"Skipping missing results table {table} for roll number {roll_number}")
+                                print(f"Table {table} not found for {roll_number}, skipping.")
+                                continue # Skip to next table if it doesn't exist
                             except Exception as e:
-                                print(f"Error in {table} processing for {roll_number}: {e}")
+                                print(f"Error processing {table} for {roll_number}: {e}")
+                                continue
 
-                        cgpa = round(total_cgpa_points_student / total_cgpa_credits_student, 2) if total_cgpa_credits_student > 0 else "No CGPA"
-
-                        section_cgpa_data.append({
-                            "roll_number": roll_number,
-                            "name": name,
-                            "cgpa": cgpa
-                        })
-                        del student # Explicitly delete student data from memory after processing
-                        gc.collect()
+                        student_cgpa = round(total_cgpa_points_student / total_cgpa_credits_student, 2) if total_cgpa_credits_student > 0 else "N/A"
+                        section_cgpa_data.append({"roll_number": roll_number, "name": name, "cgpa": student_cgpa})
 
                     section_results[section] = section_cgpa_data
+        
+        # Manually trigger garbage collection after processing a large amount of data
+        gc.collect()
 
     except Exception as e:
-        flash(f"Error fetching student CGPAs: {str(e)}", "danger")
-        print(f"!!! ERROR fetching student CGPAs: {e}")
+        flash(f"Error fetching all students: {str(e)}", "danger")
+        print(f"!!! ERROR fetching all students: {e}")
         import traceback
         traceback.print_exc()
-        return redirect(url_for('home'))
+        return redirect(url_for('admin_dashboard'))
 
     return render_template('all_students.html', section_results=section_results)
 
-
-# --- Excel Download Routes ---
-import openpyxl # Import here to ensure it's available for this section
-
-# Download option for individual section results
-@app.route('/download_section_excel/<section>')
-@login_required # Ensure only logged-in users can download
-def download_section_excel(section):
-    """Generate and download an Excel file for a specific section."""
-    # Re-fetch data if section_results might be stale or too large to keep in memory globally
-    # For a robust solution, you might re-query the DB here instead of relying on global 'section_results'
-    # especially if 'all_students' is not always visited right before download.
-    if section not in section_results or not section_results[section]:
-        flash("Section data not found or not loaded. Please visit /all_students first or try again.", "danger")
-        return redirect(url_for('all_students'))
-
-    # Create an in-memory binary stream for the Excel file
-    output = io.BytesIO()
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = f"{section}_CGPA"
-
-    # Add headers
-    ws.append(["Roll Number", "Name", "CGPA"])
-
-    # Add data
-    for student_data in section_results[section]:
-        ws.append([student_data.get("roll_number"), student_data.get("name"), student_data.get("cgpa")])
-
-    wb.save(output)
-    output.seek(0) # Go to the beginning of the stream
-
-    # Set up the response for file download
-    return Response(
-        output.getvalue(),
-        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f"attachment;filename={section}_CGPA_Report.xlsx"}
-    )
-
-# Download all students CGPA data into a single Excel file
-@app.route('/download_all_students_excel')
+@app.route('/download_section_cgpa_excel')
 @login_required
-def download_all_students_excel():
-    global section_results # Use the globally stored data
+def download_section_cgpa_excel():
+    if not current_user.is_admin:
+        flash("Unauthorized access!", "danger")
+        return redirect(url_for('dashboard'))
 
     if not section_results:
-        flash("No student CGPA data loaded. Please visit /all_students first.", "danger")
+        flash("No data available to download. Please view 'All Students' first.", "warning")
         return redirect(url_for('all_students'))
 
     output = io.BytesIO()
-    wb = openpyxl.Workbook()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        for section_name, students_data in section_results.items():
+            if students_data: # Only create sheet if there's data for the section
+                df = pd.DataFrame(students_data)
+                df.to_excel(writer, sheet_name=section_name[:30], index=False) # Sheet names max 31 chars
 
-    for section_name, students_data in section_results.items():
-        ws = wb.create_sheet(title=section_name)
-        ws.append(["Roll Number", "Name", "CGPA"]) # Headers
-
-        for student_data in students_data:
-            ws.append([student_data.get("roll_number"), student_data.get("name"), student_data.get("cgpa")])
-
-    # Remove the default 'Sheet' created initially if multiple sheets were added
-    if 'Sheet' in wb.sheetnames:
-        del wb['Sheet']
-
-    wb.save(output)
     output.seek(0)
+    return send_file(output, as_attachment=True, download_name='all_students_cgpa.xlsx', mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
-    return Response(
-        output.getvalue(),
-        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": "attachment;filename=All_Students_CGPA_Report.xlsx"}
-    )
+@app.route('/get_download_pdf', methods=['POST'])
+@login_required
+def get_download_pdf():
+    roll_number = request.form.get('roll_number')
+    year = request.form.get('year')
+    exam_type = request.form.get('exam_type')
+    course = request.form.get('course')
+    semester = request.form.get('semester')
+
+    if not all([roll_number, year, exam_type, course, semester]):
+        flash("All fields (Roll Number, Year, Exam Type, Course, Semester) are required to generate PDF.", "danger")
+        return redirect(url_for('search_page'))
+
+    # Enqueue the PDF generation task to the Celery queue
+    # The 'generate_pdf_task' function MUST be in worker.py and decorated with @celery_app.task
+    task = generate_pdf_task.delay(roll_number, year, exam_type, course, semester)
+    
+    # Store task ID in session to allow polling for status
+    session['pdf_generation_task_id'] = task.id
+    
+    flash("PDF generation has been started in the background. Please wait and check the status page.", "info")
+    return redirect(url_for('pdf_status')) # Redirect to a status page
+
+@app.route('/pdf_status')
+@login_required
+def pdf_status():
+    task_id = session.get('pdf_generation_task_id')
+    if not task_id:
+        flash("No PDF generation task found.", "warning")
+        return redirect(url_for('search_page'))
+
+    # Get the Celery task by ID
+    task = celery_app.AsyncResult(task_id)
+
+    if task.state == 'PENDING':
+        response = {'status': 'Pending', 'message': 'PDF generation is pending.'}
+    elif task.state == 'STARTED':
+        response = {'status': 'Processing', 'message': 'PDF generation is in progress.'}
+    elif task.state == 'SUCCESS':
+        result = task.result
+        if result and result.get('status') == 'success':
+            pdf_path = result.get('path')
+            response = {'status': 'Success', 'message': 'PDF generated successfully!', 'download_url': url_for('download_generated_pdf', filename=os.path.basename(pdf_path))}
+            session.pop('pdf_generation_task_id', None) # Clear task ID from session
+        else:
+            response = {'status': 'Failure', 'message': result.get('message', 'PDF generation failed.')}
+            session.pop('pdf_generation_task_id', None) # Clear task ID from session
+    elif task.state == 'FAILURE':
+        response = {'status': 'Failure', 'message': f'PDF generation failed: {task.info}'}
+        session.pop('pdf_generation_task_id', None) # Clear task ID from session
+    else:
+        response = {'status': task.state, 'message': 'Unknown task status.'}
+    
+    return render_template('pdf_status.html', response=response)
+
+@app.route('/download_generated_pdf/<filename>')
+@login_required
+def download_generated_pdf(filename):
+    # Ensure the file is within the allowed directory
+    # IMPORTANT: Adjust 'generated_pdfs' to match the actual output folder in worker.py
+    pdf_dir = os.path.join(DATABASE_DIR, 'generated_pdfs')
+    file_path = os.path.join(pdf_dir, filename)
+
+    if os.path.exists(file_path):
+        return send_file(file_path, as_attachment=True, download_name=filename, mimetype='application/pdf')
+    else:
+        flash("File not found.", "danger")
+        return redirect(url_for('pdf_status'))
 
 
-# --- Error Handlers ---
-@app.errorhandler(404)
-def page_not_found(e):
-    return render_template('404.html'), 404
+# --- Initialize all databases when the app starts up ---
+# This is safe to call multiple times as CREATE TABLE IF NOT EXISTS handles existing tables.
+# This ensures that tables are ready before the application tries to interact with them.
+print("App starting up. Initializing databases...")
+initialize_all_dbs()
+print("Databases initialized.")
 
-@app.errorhandler(500)
-def internal_server_error(e):
-    return render_template('500.html'), 500
-
-# --- App Initialization ---
 if __name__ == '__main__':
-    # Initialize all databases on app startup
-    initialize_all_dbs()
-    # It's good practice to call connect_auth_db, connect_results_db etc. from config.py
-    # This also handles creating the persistent data directory if it doesn't exist.
-
-    app.run(debug=os.environ.get('FLASK_DEBUG', 'False').lower() == 'true', host='0.0.0.0', port=os.environ.get('PORT', 5000))
+    app.run(debug=os.getenv('FLASK_DEBUG', 'False').lower() == 'true', host='0.0.0.0', port=int(os.getenv('PORT', 5000)))
