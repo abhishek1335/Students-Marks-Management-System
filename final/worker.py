@@ -36,9 +36,9 @@ celery_app = Celery('my_worker', broker=REDIS_URL, backend=REDIS_URL)
 # --- Directory for uploaded files ---
 # Ensure UPLOAD_FOLDER uses DATABASE_DIR for persistence
 UPLOAD_FOLDER = os.path.join(DATABASE_DIR, 'uploads')
-if not os.path.exists(UPLOAD_FOLDER):
-    os.makedirs(UPLOAD_FOLDER)
-    logger.info(f"Created upload folder: {UPLOAD_FOLDER}")
+# Fix: Use exist_ok=True to prevent FileExistsError during concurrent startup
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+logger.info(f"Ensured upload folder exists: {UPLOAD_FOLDER}") # Updated log message
 
 # --- Helper function for hashing file content ---
 def hash_file(filepath):
@@ -208,11 +208,13 @@ def generate_pdf_task(roll_number, year, exam_type, course, semester):
         table_name = f"results_{year}_{exam_type}_{course}_{semester}".lower()
 
         # Fetch student's results from the specific table
+        # Using connect_student_db() provides sqlite3.Row factory, so fetchall() would give list of Row objects.
+        # However, for a single student, fetchone() is appropriate.
         cursor.execute(f"SELECT * FROM {table_name} WHERE roll_number = ?", (roll_number,))
         student_data = cursor.fetchone()
 
         if student_data:
-            # Convert row to dictionary for easier access
+            # Convert Row object to dictionary for easier access
             student_dict = dict(student_data)
             logger.info(f"Found student data for {roll_number}: {student_dict}")
             
@@ -228,10 +230,13 @@ def generate_pdf_task(roll_number, year, exam_type, course, semester):
             # c.save()
 
             # For now, just simulate success
-            pdf_output_path = f"generated_pdfs/{roll_number}_{year}_{exam_type}_{course}_{semester}.pdf"
-            os.makedirs(os.path.dirname(pdf_output_path), exist_ok=True) # Ensure dir exists
+            # Ensure the output directory for generated PDFs exists using exist_ok=True
+            pdf_output_dir = os.path.join(DATABASE_DIR, 'generated_pdfs') # Changed to use DATABASE_DIR
+            os.makedirs(pdf_output_dir, exist_ok=True) 
+            pdf_output_path = os.path.join(pdf_output_dir, f"result_{roll_number}_{year}_{exam_type}_{course}_{semester}.pdf")
+            
             with open(pdf_output_path, "w") as f: # Create a dummy file
-                f.write(f"This is a dummy PDF for {roll_number} - {year} {exam_type} {course} {semester}")
+                f.write(f"This is a dummy PDF for {student_dict.get('name', 'N/A')} (Roll No: {roll_number}) - {year} {exam_type} {course} {semester}")
 
             logger.info(f"PDF generated (or simulated) for {roll_number} at {pdf_output_path}")
             return {"status": "success", "path": pdf_output_path}
