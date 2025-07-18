@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 import sqlite3
+import tabula # Import tabula for PDF processing
 
 # Import database connection functions and path from config.py
 from config import (
@@ -36,9 +37,10 @@ celery_app = Celery('my_worker', broker=REDIS_URL, backend=REDIS_URL)
 # --- Directory for uploaded files ---
 # Ensure UPLOAD_FOLDER uses DATABASE_DIR for persistence
 UPLOAD_FOLDER = os.path.join(DATABASE_DIR, 'uploads')
-# Fix: Use exist_ok=True to prevent FileExistsError during concurrent startup
+# Fix: Using exist_ok=True ensures the directory is created if it doesn't exist,
+# and no error is raised if it already exists, preventing race conditions.
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-logger.info(f"Ensured upload folder exists: {UPLOAD_FOLDER}") # Updated log message
+logger.info(f"Ensured upload folder exists: {UPLOAD_FOLDER}")
 
 # --- Helper function for hashing file content ---
 def hash_file(filepath):
@@ -87,28 +89,26 @@ def process_excel_task(self, file_path, year, exam_type, course, semester):
         # Define table names based on parameters
         # For student.db, a table per year_exam_course_semester for results
         student_results_table_name = f"results_{year}_{exam_type}_{course}_{semester}".lower()
-        # For results.db, a general students table is already in config.py
-        # You might also want a summary table in results.db if results.db is for overall records.
+        # Sanitize for SQL table name rules
+        student_results_table_name = re.sub(r'[^a-zA-Z0-9_]', '', student_results_table_name)
+        
 
         # --- Process for student.db (detailed results per student per exam) ---
         student_conn = connect_student_db()
         student_cursor = student_conn.cursor()
+        student_cursor.row_factory = sqlite3.Row # Allows column access by name
 
         # Create table dynamically for detailed results in student.db
-        # We need to infer data types or standardize them. For simplicity, let's use TEXT for most.
-        # Primary key will be auto-generated, or if you have a unique roll_number, use that.
-        # Assuming 'roll_number' is a consistent column for unique student identification.
-
         columns_sql = []
         for col in df.columns:
             if col == 'roll_number':
                 columns_sql.append(f"{col} TEXT UNIQUE NOT NULL")
-            elif 'marks' in col or 'grade' in col or 'result' in col:
+            elif 'marks' in col or 'grade' in col or 'result' in col or 'credits' in col:
                 columns_sql.append(f"{col} TEXT") # Or INTEGER/REAL if you know it's purely numeric
             else:
                 columns_sql.append(f"{col} TEXT")
         
-        create_table_sql = f"CREATE TABLE IF NOT EXISTS {student_results_table_name} (id INTEGER PRIMARY KEY AUTOINCREMENT, {', '.join(columns_sql)})"
+        create_table_sql = f"CREATE TABLE IF NOT EXISTS `{student_results_table_name}` (id INTEGER PRIMARY KEY AUTOINCREMENT, {', '.join(columns_sql)})"
         
         logger.info(f"Creating/Verifying table in student.db: {student_results_table_name}")
         student_cursor.execute(create_table_sql)
@@ -117,7 +117,7 @@ def process_excel_task(self, file_path, year, exam_type, course, semester):
         # Insert data into the student_results_table_name table in student.db
         insert_columns = ', '.join(df.columns)
         placeholders = ', '.join(['?' for _ in df.columns])
-        insert_sql = f"INSERT OR REPLACE INTO {student_results_table_name} ({insert_columns}) VALUES ({placeholders})"
+        insert_sql = f"INSERT OR REPLACE INTO `{student_results_table_name}` ({insert_columns}) VALUES ({placeholders})"
         
         data_to_insert = [tuple(row) for row in df.values]
         
@@ -142,7 +142,6 @@ def process_excel_task(self, file_path, year, exam_type, course, semester):
             students_data = df[['name', 'roll_number']].drop_duplicates()
             
             # Using INSERT OR IGNORE to add new students without erroring on existing ones
-            # or INSERT OR REPLACE if you want to update names if roll number exists
             insert_student_sql = "INSERT OR IGNORE INTO students (name, roll_number) VALUES (?, ?)"
             
             students_to_insert = [tuple(row) for row in students_data.values]
@@ -191,6 +190,133 @@ def process_excel_task(self, file_path, year, exam_type, course, semester):
         if student_conn:
             student_conn.close()
 
+
+# --- PDF Marks Processing Logic (NEW TASK) ---
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=300)
+def process_marks_pdf_task(self, file_path, year, semester):
+    """
+    Celery task to process an uploaded PDF file, extract marks,
+    and store them in the database.
+    """
+    logger.info(f"Starting PDF marks processing for file: {file_path} for Year: {year}, Semester: {semester}")
+    results_conn = None
+    try:
+        file_hash = hash_file(file_path) # Reuse your existing hash_file helper
+
+        results_conn = connect_results_db()
+        cursor = results_conn.cursor()
+        cursor.row_factory = sqlite3.Row # Allows column access by name
+
+        # Re-check if PDF was already processed (good practice for idempotency)
+        cursor.execute("SELECT id FROM uploaded_pdfs WHERE pdf_hash = ?", (file_hash,))
+        if cursor.fetchone():
+            logger.warning(f"PDF {file_path} (hash: {file_hash}) already processed. Skipping in worker.")
+            return {"status": "skipped", "message": "PDF already processed."}
+
+        # --- PDF Parsing Logic using tabula-py ---
+        # This part is highly dependent on the structure of your PDFs.
+        # You might need to adjust pages, area, columns, etc.
+        try:
+            # tabula.read_pdf returns a list of DataFrames, one for each table found
+            # You might need to specify area or columns for better extraction
+            dfs = tabula.read_pdf(
+                file_path,
+                pages='all',
+                multiple_tables=True,
+                stream=True, # Use stream=True for structured data
+                guess=False  # Set to True if you want tabula to guess table areas
+                # area=[top, left, bottom, right] # Example: specify area if tables are in a fixed region
+                # columns=[col1, col2, ...] # Example: specify column boundaries
+            )
+            logger.info(f"Extracted {len(dfs)} tables from PDF: {file_path}")
+
+            # Define the table name where marks will be stored in results.db
+            # This should match your existing schema or be created dynamically
+            # Assuming a general marks table in results.db for PDF data
+            marks_table_name = f"y{year}_s{semester}_results_pdf".lower() # Distinct name for PDF results
+            marks_table_name = re.sub(r'[^a-zA-Z0-9_]', '', marks_table_name) # Sanitize
+
+            # Create the table if it doesn't exist (assuming columns like htno, subname, grade, credits)
+            cursor.execute(f"""
+                CREATE TABLE IF NOT EXISTS `{marks_table_name}` (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    htno TEXT NOT NULL,
+                    subname TEXT,
+                    grade TEXT,
+                    credits REAL,
+                    UNIQUE(htno, subname) ON CONFLICT REPLACE
+                )
+            """)
+            results_conn.commit()
+            logger.info(f"Ensured table `{marks_table_name}` exists in results.db.")
+
+            # Process each DataFrame and insert into the database
+            total_rows_inserted = 0
+            for df in dfs:
+                if df.empty:
+                    continue
+
+                # Standardize column names for insertion (adjust based on your PDF's actual columns)
+                # Example: Assuming PDF columns like 'HTNO', 'Subject', 'Grade', 'Credits'
+                # You'll need to inspect your PDF's output from tabula to map these correctly.
+                df.columns = [col.strip().replace(' ', '_').replace('.', '').replace('/', '_').replace('\\', '_').replace('-', '_').lower() for col in df.columns]
+
+                # Filter for essential columns and ensure they exist
+                required_cols = ['htno', 'subname', 'grade', 'credits'] # Adjust these based on your PDF and DB schema
+                if not all(col in df.columns for col in required_cols):
+                    logger.warning(f"Skipping a table due to missing required columns in PDF: {df.columns}. Required: {required_cols}")
+                    continue
+
+                # Prepare data for insertion
+                data_to_insert = []
+                for index, row in df.iterrows():
+                    htno = str(row.get('htno', '')).strip()
+                    subname = str(row.get('subname', '')).strip()
+                    grade = str(row.get('grade', '')).strip()
+                    credits = float(row.get('credits', 0.0)) # Convert to float, default to 0.0
+
+                    if htno and subname: # Only insert if essential fields are present
+                        data_to_insert.append((htno, subname, grade, credits))
+
+                if data_to_insert:
+                    insert_sql = f"INSERT OR REPLACE INTO `{marks_table_name}` (htno, subname, grade, credits) VALUES (?, ?, ?, ?)"
+                    cursor.executemany(insert_sql, data_to_insert)
+                    results_conn.commit()
+                    total_rows_inserted += len(data_to_insert)
+                    logger.info(f"Inserted {len(data_to_insert)} rows into `{marks_table_name}`.")
+
+            logger.info(f"Total {total_rows_inserted} marks records inserted/updated from PDF: {file_path}")
+
+            # Record the file hash in uploaded_pdfs table AFTER successful processing
+            cursor.execute("INSERT INTO uploaded_pdfs (pdf_hash) VALUES (?)", (file_hash,))
+            results_conn.commit()
+            logger.info(f"File hash {file_hash} recorded in uploaded_pdfs after successful PDF processing.")
+
+        except Exception as pdf_process_error:
+            logger.error(f"Error during tabula PDF processing for {file_path}: {pdf_process_error}", exc_info=True)
+            results_conn.rollback() # Rollback any partial inserts
+            raise # Re-raise to trigger Celery retry mechanism
+
+        # --- Clean up the uploaded file ---
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            logger.info(f"Deleted uploaded PDF file: {file_path}")
+
+        logger.info(f"Successfully processed PDF file: {file_path}")
+        return {"status": "success", "message": "PDF processed and marks stored."}
+
+    except Exception as e:
+        logger.error(f"Overall error in process_marks_pdf_task for {file_path}: {e}", exc_info=True)
+        try:
+            self.retry(exc=e)
+        except Exception as retry_e:
+            logger.error(f"Max retries exceeded or failed to retry task for PDF: {retry_e}")
+            return {"status": "failure", "message": f"Failed to process PDF file after retries: {e}"}
+    finally:
+        if results_conn:
+            results_conn.close()
+
+
 # --- Example of another task (if needed) ---
 @celery_app.task
 def generate_pdf_task(roll_number, year, exam_type, course, semester):
@@ -202,15 +328,15 @@ def generate_pdf_task(roll_number, year, exam_type, course, semester):
     student_conn = None
     try:
         student_conn = connect_student_db()
+        student_conn.row_factory = sqlite3.Row # Ensure rows can be accessed by column name
         cursor = student_conn.cursor()
 
         # Construct table name
         table_name = f"results_{year}_{exam_type}_{course}_{semester}".lower()
+        table_name = re.sub(r'[^a-zA-Z0-9_]', '', table_name) # Sanitize
 
         # Fetch student's results from the specific table
-        # Using connect_student_db() provides sqlite3.Row factory, so fetchall() would give list of Row objects.
-        # However, for a single student, fetchone() is appropriate.
-        cursor.execute(f"SELECT * FROM {table_name} WHERE roll_number = ?", (roll_number,))
+        cursor.execute(f"SELECT * FROM `{table_name}` WHERE roll_number = ?", (roll_number,))
         student_data = cursor.fetchone()
 
         if student_data:
@@ -220,17 +346,7 @@ def generate_pdf_task(roll_number, year, exam_type, course, semester):
             
             # --- PDF Generation Logic (Placeholder) ---
             # You would use a library like ReportLab or FPDF here.
-            # Example (conceptual):
-            # from reportlab.lib.pagesizes import letter
-            # from reportlab.pdfgen import canvas
-            # c = canvas.Canvas(f"result_{roll_number}.pdf", pagesize=letter)
-            # c.drawString(100, 750, f"Result for {student_dict.get('name', 'N/A')}")
-            # c.drawString(100, 730, f"Roll Number: {student_dict.get('roll_number', 'N/A')}")
-            # # ... add more details from student_dict
-            # c.save()
-
             # For now, just simulate success
-            # Ensure the output directory for generated PDFs exists using exist_ok=True
             pdf_output_dir = os.path.join(DATABASE_DIR, 'generated_pdfs') # Changed to use DATABASE_DIR
             os.makedirs(pdf_output_dir, exist_ok=True) 
             pdf_output_path = os.path.join(pdf_output_dir, f"result_{roll_number}_{year}_{exam_type}_{course}_{semester}.pdf")
