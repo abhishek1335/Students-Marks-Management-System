@@ -9,9 +9,9 @@ import bcrypt # Import bcrypt for password hashing
 DATABASE_DIR = os.getenv('DATABASE_DIR', os.path.join(os.path.dirname(__file__), 'data'))
 
 # Ensure the database directory exists. This is crucial for both local and Render.
-if not os.path.exists(DATABASE_DIR):
-    os.makedirs(DATABASE_DIR)
-    print(f"Created database directory: {DATABASE_DIR}") # For clearer logs
+# Using exist_ok=True prevents FileExistsError if the directory already exists.
+os.makedirs(DATABASE_DIR, exist_ok=True)
+print(f"Ensured database directory exists: {DATABASE_DIR}") # For clearer logs
 
 # Define full paths for each database file
 AUTH_DB_PATH = os.path.join(DATABASE_DIR, 'auth.db')
