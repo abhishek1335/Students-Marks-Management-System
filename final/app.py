@@ -4,7 +4,7 @@ import bcrypt
 import pandas as pd
 import tabula # Keeping this import for clarity, though it's mainly used in worker.py for actual PDF processing
 import hashlib
-import re
+#import re
 import random
 import string
 import sqlite3
