@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Search Results</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='index.css') }}">
+</head>
+<body>
+   
+    <div class="container">
+        <header>
+            <h1>🔍 Search Student Results</h1>
+        </header>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    {% for category, message in messages %}
+      <div class="alert alert-{{ category }}">{{ message }}</div>
+    {% endfor %}
+  {% endif %}
+{% endwith %}
+
+        <div class="card">
+            <form action="/get_results" method="post">
+                <label for="htno">Enter Hall Ticket Number:</label>
+                <input type="text" name="htno" id="htno" required placeholder="Enter Hall Ticket No">
+                <button type="submit">Get Results</button>
+            </form>
+        </div>
+        <div class="back-link">
+            <a href="{{ url_for('admin_dashboard') if session['is_admin'] == True else url_for('dashboard') }}">
+                🔙 Go Back
+            </a>
+        </div>
+    </div>
+</body>
+</html>

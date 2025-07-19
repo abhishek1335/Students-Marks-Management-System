@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Student Results</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='results.css') }}">
+    <script defer src="{{ url_for('static', filename='results.js') }}"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="back-link">
+            <a href="{{ url_for('admin_dashboard') if session['is_admin'] == True else url_for('dashboard') }}">
+                🔙 Go Back
+            </a>
+        </div>
+        <header>
+            <h1>📑 Student Results</h1>
+        </header>
+        
+        <!-- Student Details -->
+        <div class="student-details">
+            <div><strong>📌 Hall Ticket:</strong> {{ htnumber }}</div>
+            <div><strong>📌 Student Name:</strong> {{ student_name }}</div>
+            <div><strong>📌 CGPA:</strong> {{ cgpa }}</div>
+        </div>
+
+        {% for semester, results in student_results.items() %}
+            <div class="card">
+                <h2>📘 {{ semester.replace('_', '-') }} Results</h2>
+                {% if results == "No Data" %}
+                    <p class="no-data">No records found for this semester.</p>
+                {% else %}
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Subject Name</th>
+                                <th>Grade</th>
+                                <th>Credits</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in results %}
+                                <tr>
+                                    <td>{{ row[0] }}</td>
+                                    <td>{{ row[1] }}</td>
+                                    <td>{{ row[2] }}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+
+                    <!-- Display SGPA -->
+                    <div class="sgpa">
+                        <strong>📊 SGPA for {{ semester.replace('_', '-') }}:</strong>
+                        <span>{{ sgpa_results.get(semester, 'N/A') }}</span>
+                    </div>
+                {% endif %}
+            </div>
+        {% endfor %}
+
+        
+    </div>
+</body>
+</html>
