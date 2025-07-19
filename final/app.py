@@ -21,7 +21,7 @@ from rq import Queue, get_current_job
 from rq.exceptions import NoSuchJobError
 
 # Assuming config.py is in the same directory and contains these connection functions
-from config import connect_auth_db, connect_results_db, connect_student_db, initialize_all_dbs, MAIN_DB # Import MAIN_DB path
+from config import connect_auth_db, connect_results_db, connect_student_db, initialize_all_dbs # Import MAIN_DB path
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your_secret_key_from_env_or_a_fallback_if_not_set')
 mail = Mail(app)
