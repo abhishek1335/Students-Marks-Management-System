@@ -1,1 +1,7 @@
+{
+  "build": {
+    "builder": "docker",
+    "dockerfilePath": "final/Dockerfile"
+  }
+}
 
