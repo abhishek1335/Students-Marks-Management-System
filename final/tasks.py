@@ -9,8 +9,7 @@ import hashlib
 
 # Import database connection functions from your config.py
 # The worker process needs to know how to connect to the DBs too.
-from config import connect_db, MAIN_DB # Import connect_db for the main results DB and its path
-
+from config import connect_results_db, RESULTS_DB_PATH
 # PDF Hashing Function (can be shared or defined here)
 # It's good to keep it consistent with app.py if it's used there too.
 def generate_pdf_hash(file_path):
