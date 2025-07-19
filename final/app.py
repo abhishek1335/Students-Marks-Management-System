@@ -22,8 +22,57 @@ from rq.exceptions import NoSuchJobError
 
 # Assuming config.py is in the same directory and contains these connection functions
 from config import connect_auth_db, connect_results_db, connect_student_db, initialize_all_dbs # Import MAIN_DB path
+# Import from config.py
+from config import (
+    connect_auth_db, connect_results_db, connect_student_db,
+    initialize_all_dbs, AUTH_DB_PATH, RESULTS_DB_PATH, STUDENT_DB_PATH # If you need these paths in app.py
+)
+
+# --- Setup Logging (add this to the top of your app.py) ---
+logging.basicConfig(level=logging.INFO, stream=sys.stdout, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+logger.info("Starting Flask application initialization...")
+
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your_secret_key_from_env_or_a_fallback_if_not_set')
+logger.info("Flask app instance created.")
+
+# Generate a strong, random SECRET_KEY for sessions
+# Best practice is to load this from an environment variable in production
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', secrets.token_hex(16))
+logger.info("SECRET_KEY configured.")
+
+# RQ (Redis Queue) setup
+REDIS_URL = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+logger.info(f"Connecting to Redis at: {REDIS_URL}")
+try:
+    redis_conn = Redis.from_url(REDIS_URL)
+    queue = Queue(connection=redis_conn)
+    logger.info("Redis and RQ Queue initialized.")
+except Exception as e:
+    logger.error(f"Error connecting to Redis or initializing RQ: {e}", exc_info=True)
+    # Depending on criticality, you might want to re-raise or handle gracefully
+
+# Initialize databases
+try:
+    initialize_all_dbs()
+    logger.info("All databases initialized successfully.")
+except Exception as e:
+    logger.error(f"Error during database initialization: {e}", exc_info=True)
+    # This is often a critical error, you might want to halt if DBs are essential
+    raise # Re-raise to crash early if DB init fails
+
+# Your routes and other application logic follow...
+logger.info("Flask application routes and logic being loaded.")
+
+@app.route('/')
+def index():
+    logger.info("Index route accessed.")
+    return render_template('index.html')
+
+# ... all your other routes and functions ...
+#app = Flask(__name__)
+#app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your_secret_key_from_env_or_a_fallback_if_not_set')
 mail = Mail(app)
 
 # Mail configuration - IMPORTANT: Use environment variables for sensitive info in production
