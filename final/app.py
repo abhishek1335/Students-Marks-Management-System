@@ -9,6 +9,9 @@ import random
 import string
 import sqlite3
 import gc
+import sys # Import sys for sys.stdout
+import secrets # Import secrets for token_hex
+import logging # Import logging module
 
 from flask import Flask, jsonify, render_template, request, redirect, url_for, flash, session, Response
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
@@ -20,15 +23,13 @@ from redis import Redis
 from rq import Queue, get_current_job
 from rq.exceptions import NoSuchJobError
 
-# Assuming config.py is in the same directory and contains these connection functions
-from config import connect_auth_db, connect_results_db, connect_student_db, initialize_all_dbs # Import MAIN_DB path
-# Import from config.py
+# Import from config.py - Consolidated and using correct names
 from config import (
     connect_auth_db, connect_results_db, connect_student_db,
-    initialize_all_dbs, AUTH_DB_PATH, RESULTS_DB_PATH, STUDENT_DB_PATH # If you need these paths in app.py
+    initialize_all_dbs, AUTH_DB_PATH, RESULTS_DB_PATH, STUDENT_DB_PATH
 )
 
-# --- Setup Logging (add this to the top of your app.py) ---
+# --- Setup Logging ---
 logging.basicConfig(level=logging.INFO, stream=sys.stdout, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -38,83 +39,69 @@ app = Flask(__name__)
 logger.info("Flask app instance created.")
 
 # Generate a strong, random SECRET_KEY for sessions
-# Best practice is to load this from an environment variable in production
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', secrets.token_hex(16))
 logger.info("SECRET_KEY configured.")
 
-# RQ (Redis Queue) setup
-REDIS_URL = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
-logger.info(f"Connecting to Redis at: {REDIS_URL}")
-try:
-    redis_conn = Redis.from_url(REDIS_URL)
-    queue = Queue(connection=redis_conn)
-    logger.info("Redis and RQ Queue initialized.")
-except Exception as e:
-    logger.error(f"Error connecting to Redis or initializing RQ: {e}", exc_info=True)
-    # Depending on criticality, you might want to re-raise or handle gracefully
-
-# Initialize databases
-try:
-    initialize_all_dbs()
-    logger.info("All databases initialized successfully.")
-except Exception as e:
-    logger.error(f"Error during database initialization: {e}", exc_info=True)
-    # This is often a critical error, you might want to halt if DBs are essential
-    raise # Re-raise to crash early if DB init fails
-
-# Your routes and other application logic follow...
-logger.info("Flask application routes and logic being loaded.")
-
-@app.route('/')
-def index():
-    logger.info("Index route accessed.")
-    return render_template('index.html')
-
-# ... all your other routes and functions ...
-#app = Flask(__name__)
-#app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your_secret_key_from_env_or_a_fallback_if_not_set')
-mail = Mail(app)
-
-# Mail configuration - IMPORTANT: Use environment variables for sensitive info in production
+# Mail configuration
 app.config['MAIL_SERVER'] = os.environ.get('MAIL_SERVER', 'smtp.gmail.com')
 app.config['MAIL_PORT'] = int(os.environ.get('MAIL_PORT', 587))
 app.config['MAIL_USE_TLS'] = os.environ.get('MAIL_USE_TLS', 'True').lower() == 'true'
 app.config['MAIL_USE_SSL'] = os.environ.get('MAIL_USE_SSL', 'False').lower() == 'true'
 app.config['MAIL_USERNAME'] = os.environ.get('MAIL_USERNAME', 'darkplayer1335@gmail.com')
 app.config['MAIL_PASSWORD'] = os.environ.get('MAIL_PASSWORD', 'uqic wxbn pnfe khqt')
+mail = Mail(app)
+logger.info("Flask-Mail configured.")
+
+
+# RQ (Redis Queue) setup - Consolidated to one block
+REDIS_URL = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+logger.info(f"Attempting to connect to Redis at: {REDIS_URL}")
+try:
+    redis_conn = Redis.from_url(REDIS_URL)
+    # Ping Redis to ensure connection is live. If not, it will raise an error.
+    redis_conn.ping()
+    q = Queue(connection=redis_conn) # Use 'q' consistently
+    logger.info("Redis and RQ Queue initialized and connected successfully.")
+except Exception as e:
+    logger.critical(f"FATAL ERROR: Could not connect to Redis or initialize RQ: {e}", exc_info=True)
+    # This is a critical dependency. If Redis isn't working, the app can't function.
+    # Re-raise to prevent the Flask app from starting if Redis is down.
+    raise
+
+# Initialize databases
+try:
+    initialize_all_dbs()
+    logger.info("All databases initialized successfully.")
+except Exception as e:
+    logger.critical(f"FATAL ERROR: During database initialization: {e}", exc_info=True)
+    # This is a critical dependency. If DBs can't initialize, the app can't function.
+    raise
 
 # Initialize Flask-Login
 login_manager = LoginManager()
 login_manager.login_view = 'login'
 login_manager.init_app(app)
+logger.info("Flask-Login initialized.")
 
 # Define upload folders
 UPLOAD_FOLDER = "uploads" # This will be used to temporarily store files before workers pick them up
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-
-# Note: UPLOAD_FOLDER1 seems unused in the provided code, removing for clarity
-# UPLOAD_FOLDER1 = "uploads1"
-# os.makedirs(UPLOAD_FOLDER1, exist_ok=True)
+logger.info(f"Ensured UPLOAD_FOLDER exists: {UPLOAD_FOLDER}")
 
 # Set a maximum content length for uploads (e.g., 100 MB)
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024 # 100 MB
-
-# --- Redis and RQ setup ---
-redis_url = os.environ.get('REDIS_URL', 'redis://localhost:6379/0') # Use env var for Render
-redis_conn = Redis.from_url(redis_url)
-q = Queue(connection=redis_conn) # Default queue for tasks
+logger.info("MAX_CONTENT_LENGTH set.")
 
 # --- Import the background task function ---
-# This import needs to be here so Flask knows about the task function
-# but the task itself will be executed by the worker.
 from tasks import process_pdf_task
+logger.info("Imported process_pdf_task from tasks.py.")
+
 
 # --- Helper Functions (keep them here as they are used by Flask routes) ---
 def generate_token():
     """Generates a random alphanumeric token."""
     return ''.join(random.choices(string.ascii_letters + string.digits, k=6))
 
-# PDF hashing can remain here as it's used before enqueuing
 def generate_pdf_hash(file_path):
     """Generates SHA256 hash for the uploaded PDF."""
     hasher = hashlib.sha256()
@@ -123,7 +110,7 @@ def generate_pdf_hash(file_path):
             hasher.update(chunk)
     return hasher.hexdigest()
 
-# --- Flask-Login User Class (remains unchanged) ---
+# --- Flask-Login User Class ---
 class User(UserMixin):
     def __init__(self, id, username, email, is_admin=False):
         self.id = id
@@ -142,7 +129,7 @@ def load_user(user_id):
         return User(user_data['id'], user_data['username'], user_data['email'], bool(user_data['is_admin']))
     return None
 
-# --- Authentication Routes (remain largely unchanged) ---
+# --- Authentication Routes ---
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
@@ -158,7 +145,7 @@ def register():
             cursor = conn.cursor()
             try:
                 cursor.execute("INSERT INTO users (username, email, password, is_admin) VALUES (?, ?, ?, ?)",
-                                (username, email, hashed_password, 0))
+                                 (username, email, hashed_password, 0))
                 conn.commit()
                 flash("Account created! Please log in.", "success")
                 return redirect(url_for('login'))
@@ -296,7 +283,7 @@ def create_admin():
             cursor = conn.cursor()
             try:
                 cursor.execute("INSERT INTO users (username, email, password, is_admin) VALUES (?, ?, ?, ?)",
-                                (username, email, hashed_password, 1))
+                                 (username, email, hashed_password, 1))
                 conn.commit()
                 flash("New admin account created!", "success")
                 return redirect(url_for('admin_dashboard'))
@@ -322,7 +309,6 @@ def details_page():
 
 @app.route('/upload_results')
 def results_page():
-    # This page will now show a message that processing is happening in background
     return render_template('upload_student_results.html')
 
 # Uploading students results - MODIFIED FOR RQ
@@ -349,9 +335,6 @@ def upload_pdf():
     table_name = re.sub(r'[^a-zA-Z0-9_]', '', table_name)
 
     # Use a unique filename to prevent clashes if multiple users upload same filename
-    # Or, even better, if you store the file temporarily for the worker,
-    # use its hash or a UUID for its filename.
-    # For now, let's append a timestamp or a random string to the filename.
     unique_filename = f"{os.path.splitext(file.filename)[0]}_{random.randint(1000, 9999)}{os.path.splitext(file.filename)[1]}"
     temp_pdf_path = os.path.join(UPLOAD_FOLDER, unique_filename)
 
@@ -367,24 +350,20 @@ def upload_pdf():
 
     try:
         # Enqueue the task to the Redis Queue
-        # Pass necessary arguments to the background task
         job = q.enqueue(
             process_pdf_task,
             temp_pdf_path,
             year,
             semester,
             table_name,
-            MAIN_DB, # Pass the path to the main results database
-            job_timeout='10m', # Set a reasonable timeout for PDF processing (e.g., 10 minutes)
-            result_ttl=5000,   # How long to keep the job result in Redis (seconds)
-            meta={'user_id': current_user.id} # Store user ID for potential notification later
+            RESULTS_DB_PATH, # Corrected: Use RESULTS_DB_PATH
+            job_timeout='10m',
+            result_ttl=5000,
+            meta={'user_id': current_user.id}
         )
 
         flash(f'PDF upload received. Processing started in the background (Job ID: {job.id}).', 'info')
         print(f"PDF processing job enqueued: {job.id}")
-
-        # Store job ID in session or a temporary DB for user to check status
-        # For simplicity, we're just flashing the ID here.
         session['last_upload_job_id'] = job.id
 
         return redirect(url_for('results_page'))
@@ -393,7 +372,7 @@ def upload_pdf():
         flash(f'Error enqueuing PDF processing task: {str(e)}', 'danger')
         print(f"!!! ERROR enqueuing task: {e}")
         if os.path.exists(temp_pdf_path):
-            os.remove(temp_pdf_path) # Clean up temp file on enqueue error
+            os.remove(temp_pdf_path)
         import traceback
         traceback.print_exc()
         return redirect(url_for('results_page'))
@@ -408,7 +387,7 @@ def upload_status(job_id):
             return jsonify({'status': 'not_found', 'message': 'Job not found'}), 404
         
         status = job.get_status()
-        result = job.result # The return value of your process_pdf_task
+        result = job.result
 
         if status == 'failed':
             return jsonify({'status': status, 'message': 'Processing failed', 'error': str(job.exc_info)}), 200
@@ -425,7 +404,7 @@ def upload_status(job_id):
         traceback.print_exc()
         return jsonify({'status': 'error', 'message': f'An error occurred: {str(e)}'}), 500
 
-# --- Search and Display Routes (remain largely unchanged, but note DB paths) ---
+# --- Search and Display Routes ---
 @app.route('/get_results', methods=['POST'])
 def get_results():
     htnumber = request.form.get('htno')
@@ -444,19 +423,18 @@ def get_results():
     grade_values = {"A+": 10, "A": 9, "B": 8, "C": 7, "D": 6, "E": 5, "F": 0, "MP": 0, "ABSENT": 0, "COMPLE": 0}
 
     # Connect to the correct databases
-    conn_main = connect_db() # This should be your results.db
-    conn_student = connect_student_db() # This should be your students.db
+    conn_main = connect_results_db() # Corrected: Use connect_results_db
+    conn_student = connect_student_db()
 
     student_name = "Unknown"
 
     try:
         with conn_main:
-            with conn_student: # Ensure both connections are managed
+            with conn_student:
                 cursor_main = conn_main.cursor()
-                cursor_student = conn_student.cursor() # This cursor is for the students.db
+                cursor_student = conn_student.cursor()
 
-                # Fetch student name from the 'students' table in 'MAIN_DB' (results.db)
-                # Ensure the 'students' table exists in results.db, as per config.py initialization
+                # Fetch student name from the 'students' table in 'results.db' (assuming this is where it resides for search)
                 cursor_main.execute("SELECT name FROM students WHERE roll_number = ? LIMIT 1", (htnumber,))
                 student_name_data = cursor_main.fetchone()
                 student_name = student_name_data['name'] if student_name_data else "Unknown"
@@ -478,8 +456,7 @@ def get_results():
 
                                 if grade.upper() in ("F", "MP", "ABSENT") or credits == 0.0:
                                     try:
-                                        # This query should also target the main_db
-                                        cursor_main.execute(
+                                        cursor_main.execute( # Query the results.db
                                             f"SELECT credits FROM `{table}` WHERE subname = ? AND grade NOT IN ('F', 'MP', 'ABSENT', 'COMPLE') LIMIT 1",
                                             (subname,)
                                         )
@@ -528,9 +505,6 @@ def get_results():
     return render_template('results.html', student_name=student_name, student_results=student_results, sgpa_results=sgpa_results, cgpa=cgpa, htnumber=htnumber)
 
 # Global variable to store section results for download.
-# CAUTION: This can be a major memory hog for many students/sections.
-# For production, consider generating the Excel on-the-fly without storing all data globally,
-# or using a background task/caching mechanism.
 section_results = {}
 
 @app.route('/all_students')
@@ -547,9 +521,8 @@ def all_students():
     section_results = {}
 
     try:
-        # Use connect_student_db for sections, connect_db for results
         student_conn = connect_student_db()
-        result_conn = connect_db() # This should be your results.db
+        result_conn = connect_results_db() # Corrected: Use connect_results_db
 
         with student_conn:
             with result_conn:
@@ -559,7 +532,6 @@ def all_students():
                 # Get section tables from the student_db (e.g., 'cse_a', 'ece_b')
                 student_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
                 section_tables_in_db = [table['name'] for table in student_cursor.fetchall() if table['name'] != 'students']
-                # The 'students' table here likely refers to the one in students.db, not results.db
 
                 for section in section_tables_in_db:
                     student_cursor.execute(f"SELECT roll_number, name FROM `{section}`")
@@ -571,7 +543,7 @@ def all_students():
                         roll_number = student["roll_number"]
                         name = student["name"]
 
-                        if "HP" not in roll_number:
+                        if "HP" not in roll_number: # Filter for 'HP' in roll_number
                             continue
 
                         total_cgpa_points_student = 0
@@ -646,18 +618,11 @@ def all_students():
 @app.route('/download_section_excel/<section>')
 @login_required
 def download_section_excel(section):
-    # This also needs to be optimized for large data sets in production.
-    # Generating Excel on the fly or enqueuing a task for it is better.
-    # For now, it will work with the global 'section_results' which has performance implications.
+    import openpyxl # Import openpyxl here
 
     if section not in section_results:
         flash("Section data not found or not loaded. Please visit /all_students first.", "danger")
         return redirect(url_for('all_students'))
-
-    # You are missing the `openpyxl` import and its use here.
-    # Add: `import openpyxl` at the top of your app.py
-    # And ensure `openpyxl` is in your requirements.txt
-    import openpyxl
     
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -668,10 +633,9 @@ def download_section_excel(section):
     for student_data in section_results[section]:
         ws.append([student_data["roll_number"], student_data["name"], student_data["cgpa"]])
 
-    # Create an in-memory binary stream for the Excel file
     excel_file = io.BytesIO()
     wb.save(excel_file)
-    excel_file.seek(0) # Rewind to the beginning of the stream
+    excel_file.seek(0)
 
     return Response(
         excel_file.read(),
@@ -679,9 +643,6 @@ def download_section_excel(section):
         headers={"Content-Disposition": f"attachment;filename={section}_CGPA.xlsx"}
     )
 
-
 if __name__ == '__main__':
-    # Initialize databases when the app starts
     initialize_all_dbs()
-    # For local development, this will run the Flask app
     app.run(debug=True)
