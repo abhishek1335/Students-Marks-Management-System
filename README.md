@@ -1,4 +1,4 @@
-Student Marks Management System 🎓
+#Student Marks Management System 🎓
 A web-based application designed to automate the management and visualization of student examination results. This system specifically handles result PDFs released by JNTUK, parses the data, and stores it in a structured SQL database. It provides distinct dashboards for Faculty (to manage data) and Students (to view performance metrics like CGPA, SGPA, and Backlogs).
 
 Here is a comprehensive and professional README.md file tailored for your Student Marks Management System. You can copy and paste this directly into your project repository.
